@@ -1,13 +1,28 @@
 pragma solidity ^0.5.16;
 
-import "./MToken.sol";
+import "./MBep20.sol";
+import "./SafeMath.sol";
+
+interface IERC20 {
+    function balanceOf(address owner) external view returns (uint);
+    function transfer(address dst, uint amount) external returns (bool);
+}
+
+interface IBinancePool {
+    function stake() external payable;
+}
 
 /**
  * @title Compound's MBNB Contract
  * @notice MToken which wraps Ether
  * @author Compound
  */
-contract MBNB is MToken {
+contract MBNB is MBep20 {
+    using SafeMath for uint;
+
+    address public  binancePool;
+    address public  rewardsPool;
+    
     /**
      * @notice Construct a new MBNB money market
      * @param comptroller_ The address of the Comptroller
@@ -18,32 +33,55 @@ contract MBNB is MToken {
      * @param decimals_ ERC-20 decimal precision of this token
      * @param admin_ Address of the administrator of this token
      */
-    constructor(ComptrollerInterface comptroller_,
-                InterestRateModel interestRateModel_,
-                uint initialExchangeRateMantissa_,
-                string memory name_,
-                string memory symbol_,
-                uint8 decimals_,
-                address payable admin_) public {
-        // Creator of the contract is admin during initialization
-        admin = msg.sender;
+    function initialize(address underlying_,
+                        ComptrollerInterface comptroller_,
+                        InterestRateModel interestRateModel_,
+                        uint initialExchangeRateMantissa_,
+                        string memory name_,
+                        string memory symbol_,
+                        uint8 decimals_,
+                        address payable admin_,
+                        address binancePool_,
+                        address rewardsPool_) public {
+        // MToken initialize does the bulk of the work
+        super.initialize(comptroller_, interestRateModel_, initialExchangeRateMantissa_, name_, symbol_, decimals_);
 
-        initialize(comptroller_, interestRateModel_, initialExchangeRateMantissa_, name_, symbol_, decimals_);
-
-        // Set the proper admin now that initialization is done
+        // Set underlying and sanity check it
+        underlying = underlying_;                       // aBNBb
+        EIP20Interface(underlying).totalSupply();
+                        
         admin = admin_;
+
+        binancePool = binancePool_;
+        rewardsPool = rewardsPool_;
     }
 
+    modifier settleRewards {
+        uint delta = IERC20(underlying).balanceOf(address(this)).sub(totalSupply);
+        if(delta > 0)
+            IERC20(underlying).transfer(rewardsPool, delta);
+        _;
+    }
 
     /*** User Interface ***/
 
-    /**
+   /**
      * @notice Sender supplies assets into the market and receives mTokens in exchange
      * @dev Reverts upon any failure
      */
-    function mint() external payable {
+    function mintInBNB() public payable settleRewards {
         (uint err,) = mintInternal(msg.value);
         requireNoError(err, "mint failed");
+    }
+    /**
+     * @notice Sender supplies assets into the market and receives mTokens in exchange
+     * @dev Accrues interest whether or not the operation succeeds, unless reverted
+     * @param mintAmount The amount of the underlying asset to supply
+     * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
+     */
+    function mint(uint mintAmount) external settleRewards returns (uint) {
+        (uint err,) = mintInternal(mintAmount);
+        return err;
     }
 
     /**
@@ -52,7 +90,7 @@ contract MBNB is MToken {
      * @param redeemTokens The number of mTokens to redeem into underlying
      * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
      */
-    function redeem(uint redeemTokens) external returns (uint) {
+    function redeem(uint redeemTokens) external settleRewards returns (uint) {
         return redeemInternal(redeemTokens);
     }
 
@@ -62,7 +100,7 @@ contract MBNB is MToken {
      * @param redeemAmount The amount of underlying to redeem
      * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
      */
-    function redeemUnderlying(uint redeemAmount) external returns (uint) {
+    function redeemUnderlying(uint redeemAmount) external settleRewards returns (uint) {
         return redeemUnderlyingInternal(redeemAmount);
     }
 
@@ -71,7 +109,7 @@ contract MBNB is MToken {
       * @param borrowAmount The amount of the underlying asset to borrow
       * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
       */
-    function borrow(uint borrowAmount) external returns (uint) {
+    function borrow(uint borrowAmount) external settleRewards returns (uint) {
         return borrowInternal(borrowAmount);
     }
 
@@ -79,9 +117,13 @@ contract MBNB is MToken {
      * @notice Sender repays their own borrow
      * @dev Reverts upon any failure
      */
-    function repayBorrow() external payable {
+    function repayBorrowInBNB() external payable settleRewards {
         (uint err,) = repayBorrowInternal(msg.value);
         requireNoError(err, "repayBorrow failed");
+    }
+    function repayBorrow(uint repayAmount) external settleRewards returns (uint) {
+        (uint err,) = repayBorrowInternal(repayAmount);
+        return err;
     }
 
     /**
@@ -89,9 +131,13 @@ contract MBNB is MToken {
      * @dev Reverts upon any failure
      * @param borrower the account with the debt being payed off
      */
-    function repayBorrowBehalf(address borrower) external payable {
+    function repayBorrowBehalfInBNB(address borrower) external payable settleRewards {
         (uint err,) = repayBorrowBehalfInternal(borrower, msg.value);
         requireNoError(err, "repayBorrowBehalf failed");
+    }
+    function repayBorrowBehalf(address borrower, uint repayAmount) external settleRewards returns (uint) {
+        (uint err,) = repayBorrowBehalfInternal(borrower, repayAmount);
+        return err;
     }
 
     /**
@@ -101,25 +147,31 @@ contract MBNB is MToken {
      * @param borrower The borrower of this mToken to be liquidated
      * @param mTokenCollateral The market in which to seize collateral from the borrower
      */
-    function liquidateBorrow(address borrower, MToken mTokenCollateral) external payable {
+    function liquidateBorrowInBNB(address borrower, MToken mTokenCollateral) external payable settleRewards {
         (uint err,) = liquidateBorrowInternal(borrower, msg.value, mTokenCollateral);
         requireNoError(err, "liquidateBorrow failed");
+    }
+    function liquidateBorrow(address borrower, uint repayAmount, MTokenInterface mTokenCollateral) external settleRewards returns (uint) {
+        (uint err,) = liquidateBorrowInternal(borrower, repayAmount, mTokenCollateral);
+        return err;
     }
 
     /**
      * @notice The sender adds to reserves.
      * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
      */
-    function _addReserves() external payable returns (uint) {
+    function _addReservesInBNB() external payable settleRewards returns (uint) {
         return _addReservesInternal(msg.value);
+    }
+    function _addReserves(uint addAmount) external settleRewards returns (uint) {
+        return _addReservesInternal(addAmount);
     }
 
     /**
      * @notice Send Ether to MBNB to mint
      */
     function () external payable {
-        (uint err,) = mintInternal(msg.value);
-        requireNoError(err, "mint failed");
+        mintInBNB();
     }
 
     /*** Safe Token ***/
@@ -129,11 +181,11 @@ contract MBNB is MToken {
      * @dev This excludes the value of the current message, if any
      * @return The quantity of Ether owned by this contract
      */
-    function getCashPrior() internal view returns (uint) {
-        (MathError err, uint startingBalance) = subUInt(address(this).balance, msg.value);
-        require(err == MathError.NO_ERROR);
-        return startingBalance;
-    }
+    //function getCashPrior() internal view returns (uint) {
+    //    (MathError err, uint startingBalance) = subUInt(address(this).balance, msg.value);
+    //    require(err == MathError.NO_ERROR);
+    //    return startingBalance;
+    //}
 
     /**
      * @notice Perform the actual transfer in, which is a no-op
@@ -142,16 +194,20 @@ contract MBNB is MToken {
      * @return The actual amount of Ether transferred
      */
     function doTransferIn(address from, uint amount) internal returns (uint) {
+        if(msg.value == 0)
+            return super.doTransferIn(from, amount);
+
         // Sanity checks
         require(msg.sender == from, "sender mismatch");
         require(msg.value == amount, "value mismatch");
-        return amount;
+        IBinancePool(binancePool).stake.value(msg.value)();
+        return msg.value;
     }
 
-    function doTransferOut(address payable to, uint amount) internal {
-        /* Send the Ether, with minimal gas and revert on failure */
-        to.transfer(amount);
-    }
+    //function doTransferOut(address payable to, uint amount) internal {
+    //    /* Send the Ether, with minimal gas and revert on failure */
+    //    to.transfer(amount);
+    //}
 
     function requireNoError(uint errCode, string memory message) internal pure {
         if (errCode == uint(Error.NO_ERROR)) {
