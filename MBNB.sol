@@ -10,6 +10,7 @@ interface IERC20 {
 
 interface IBinancePool {
     function stake() external payable;
+    function getRelayerFee() external view returns (uint);
 }
 
 /**
@@ -201,7 +202,7 @@ contract MBNB is MBep20 {
         require(msg.sender == from, "sender mismatch");
         require(msg.value == amount, "value mismatch");
         IBinancePool(binancePool).stake.value(msg.value)();
-        return msg.value;
+        return msg.value.sub(IBinancePool(binancePool).getRelayerFee());
     }
 
     //function doTransferOut(address payable to, uint amount) internal {
