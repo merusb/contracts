@@ -1,8 +1,8 @@
 pragma solidity ^0.5.16;
 
-import "./MBep20.sol";
+import "./KBep20.sol";
 
-contract MMER is MBep20 {
+contract KKIS is KBep20 {
     address public minter;
 
     /*** User Interface ***/

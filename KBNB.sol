@@ -1,12 +1,7 @@
 pragma solidity ^0.5.16;
 
-import "./MBep20.sol";
+import "./KBep20.sol";
 import "./SafeMath.sol";
-
-interface IERC20 {
-    function balanceOf(address owner) external view returns (uint);
-    function transfer(address dst, uint amount) external returns (bool);
-}
 
 interface IBinancePool {
     function stake() external payable;
@@ -14,25 +9,25 @@ interface IBinancePool {
 }
 
 /**
- * @title Compound's MBNB Contract
- * @notice MToken which wraps Ether
+ * @title Compound's KBNB Contract
+ * @notice KToken which wraps Ether
  * @author Compound
  */
-contract MBNB is MBep20 {
+contract KBNB is KBep20 {
     using SafeMath for uint;
 
     address public  binancePool;
     address public  rewardsPool;
+    uint    public  lastCash;
     
     /**
-     * @notice Construct a new MBNB money market
+     * @notice Construct a new KBNB money market
      * @param comptroller_ The address of the Comptroller
      * @param interestRateModel_ The address of the interest rate model
      * @param initialExchangeRateMantissa_ The initial exchange rate, scaled by 1e18
      * @param name_ ERC-20 name of this token
      * @param symbol_ ERC-20 symbol of this token
      * @param decimals_ ERC-20 decimal precision of this token
-     * @param admin_ Address of the administrator of this token
      */
     function initialize(address underlying_,
                         ComptrollerInterface comptroller_,
@@ -41,33 +36,40 @@ contract MBNB is MBep20 {
                         string memory name_,
                         string memory symbol_,
                         uint8 decimals_,
-                        address payable admin_,
                         address binancePool_,
                         address rewardsPool_) public {
-        // MToken initialize does the bulk of the work
+        // KToken initialize does the bulk of the work
         super.initialize(comptroller_, interestRateModel_, initialExchangeRateMantissa_, name_, symbol_, decimals_);
-
+    
         // Set underlying and sanity check it
         underlying = underlying_;                       // aBNBb
-        EIP20Interface(underlying).totalSupply();
+        //EIP20Interface(underlying).totalSupply();
                         
-        admin = admin_;
-
         binancePool = binancePool_;
         rewardsPool = rewardsPool_;
+        lastCash    = EIP20Interface(underlying).balanceOf(address(this));
     }
 
-    modifier settleRewards {
-        uint delta = IERC20(underlying).balanceOf(address(this)).sub(totalSupply);
+    function _beforeSettleRewards() internal {
+        uint delta = EIP20Interface(underlying).balanceOf(address(this)).sub(lastCash);
         if(delta > 0)
-            IERC20(underlying).transfer(rewardsPool, delta);
+            EIP20Interface(underlying).transfer(rewardsPool, delta);
+    }
+    modifier settleRewards {
+        _beforeSettleRewards();
         _;
+        _afterSettleRewards();
+    }
+    function _afterSettleRewards() internal {
+        uint cash = EIP20Interface(underlying).balanceOf(address(this));
+        if(lastCash != cash)
+            lastCash = cash;
     }
 
     /*** User Interface ***/
 
    /**
-     * @notice Sender supplies assets into the market and receives mTokens in exchange
+     * @notice Sender supplies assets into the market and receives kTokens in exchange
      * @dev Reverts upon any failure
      */
     function mintInBNB() public payable settleRewards {
@@ -75,7 +77,7 @@ contract MBNB is MBep20 {
         requireNoError(err, "mint failed");
     }
     /**
-     * @notice Sender supplies assets into the market and receives mTokens in exchange
+     * @notice Sender supplies assets into the market and receives kTokens in exchange
      * @dev Accrues interest whether or not the operation succeeds, unless reverted
      * @param mintAmount The amount of the underlying asset to supply
      * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
@@ -86,17 +88,17 @@ contract MBNB is MBep20 {
     }
 
     /**
-     * @notice Sender redeems mTokens in exchange for the underlying asset
+     * @notice Sender redeems kTokens in exchange for the underlying asset
      * @dev Accrues interest whether or not the operation succeeds, unless reverted
-     * @param redeemTokens The number of mTokens to redeem into underlying
+     * @param redeekTokens The number of kTokens to redeem into underlying
      * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
      */
-    function redeem(uint redeemTokens) external settleRewards returns (uint) {
-        return redeemInternal(redeemTokens);
+    function redeem(uint redeekTokens) external settleRewards returns (uint) {
+        return redeemInternal(redeekTokens);
     }
 
     /**
-     * @notice Sender redeems mTokens in exchange for a specified amount of underlying asset
+     * @notice Sender redeems kTokens in exchange for a specified amount of underlying asset
      * @dev Accrues interest whether or not the operation succeeds, unless reverted
      * @param redeemAmount The amount of underlying to redeem
      * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
@@ -145,15 +147,15 @@ contract MBNB is MBep20 {
      * @notice The sender liquidates the borrowers collateral.
      *  The collateral seized is transferred to the liquidator.
      * @dev Reverts upon any failure
-     * @param borrower The borrower of this mToken to be liquidated
-     * @param mTokenCollateral The market in which to seize collateral from the borrower
+     * @param borrower The borrower of this kToken to be liquidated
+     * @param kTokenCollateral The market in which to seize collateral from the borrower
      */
-    function liquidateBorrowInBNB(address borrower, MToken mTokenCollateral) external payable settleRewards {
-        (uint err,) = liquidateBorrowInternal(borrower, msg.value, mTokenCollateral);
+    function liquidateBorrowInBNB(address borrower, KToken kTokenCollateral) external payable settleRewards {
+        (uint err,) = liquidateBorrowInternal(borrower, msg.value, kTokenCollateral);
         requireNoError(err, "liquidateBorrow failed");
     }
-    function liquidateBorrow(address borrower, uint repayAmount, MTokenInterface mTokenCollateral) external settleRewards returns (uint) {
-        (uint err,) = liquidateBorrowInternal(borrower, repayAmount, mTokenCollateral);
+    function liquidateBorrow(address borrower, uint repayAmount, KTokenInterface kTokenCollateral) external settleRewards returns (uint) {
+        (uint err,) = liquidateBorrowInternal(borrower, repayAmount, kTokenCollateral);
         return err;
     }
 
@@ -169,7 +171,7 @@ contract MBNB is MBep20 {
     }
 
     /**
-     * @notice Send Ether to MBNB to mint
+     * @notice Send Ether to KBNB to mint
      */
     function () external payable {
         mintInBNB();

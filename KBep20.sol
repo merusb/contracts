@@ -1,18 +1,17 @@
 pragma solidity ^0.5.16;
 
-import "./MToken.sol";
-import "./USB.sol";
+import "./KToken.sol";
 
 interface CompLike {
   function delegate(address delegatee) external;
 }
 
 /**
- * @title Compound's MUSB Contract
- * @notice MTokens which wrap an EIP-20 underlying
+ * @title Compound's KBep20 Contract
+ * @notice KTokens which wrap an EIP-20 underlying
  * @author Compound
  */
-contract MUSB is MToken, MBep20Interface {
+contract KBep20 is KToken, KBep20Interface {
     /**
      * @notice Initialize the new money market
      * @param underlying_ The address of the underlying asset
@@ -30,7 +29,7 @@ contract MUSB is MToken, MBep20Interface {
                         string memory name_,
                         string memory symbol_,
                         uint8 decimals_) public {
-        // MToken initialize does the bulk of the work
+        // KToken initialize does the bulk of the work
         super.initialize(comptroller_, interestRateModel_, initialExchangeRateMantissa_, name_, symbol_, decimals_);
 
         // Set underlying and sanity check it
@@ -41,35 +40,35 @@ contract MUSB is MToken, MBep20Interface {
     /*** User Interface ***/
 
     /**
-     * @notice Sender supplies assets into the market and receives mTokens in exchange
+     * @notice Sender supplies assets into the market and receives kTokens in exchange
      * @dev Accrues interest whether or not the operation succeeds, unless reverted
      * @param mintAmount The amount of the underlying asset to supply
      * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
      */
-    //function mint(uint mintAmount) external returns (uint) {
-    //    (uint err,) = mintInternal(mintAmount);
-    //    return err;
-    //}
+    function mint(uint mintAmount) external returns (uint) {
+        (uint err,) = mintInternal(mintAmount);
+        return err;
+    }
 
     /**
-     * @notice Sender redeems mTokens in exchange for the underlying asset
+     * @notice Sender redeems kTokens in exchange for the underlying asset
      * @dev Accrues interest whether or not the operation succeeds, unless reverted
-     * @param redeemTokens The number of mTokens to redeem into underlying
+     * @param redeekTokens The number of kTokens to redeem into underlying
      * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
      */
-    //function redeem(uint redeemTokens) external returns (uint) {
-    //    return redeemInternal(redeemTokens);
-    //}
+    function redeem(uint redeekTokens) external returns (uint) {
+        return redeemInternal(redeekTokens);
+    }
 
     /**
-     * @notice Sender redeems mTokens in exchange for a specified amount of underlying asset
+     * @notice Sender redeems kTokens in exchange for a specified amount of underlying asset
      * @dev Accrues interest whether or not the operation succeeds, unless reverted
      * @param redeemAmount The amount of underlying to redeem
      * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
      */
-    //function redeemUnderlying(uint redeemAmount) external returns (uint) {
-    //    return redeemUnderlyingInternal(redeemAmount);
-    //}
+    function redeemUnderlying(uint redeemAmount) external returns (uint) {
+        return redeemUnderlyingInternal(redeemAmount);
+    }
 
     /**
       * @notice Sender borrows assets from the protocol to their own address
@@ -104,13 +103,13 @@ contract MUSB is MToken, MBep20Interface {
     /**
      * @notice The sender liquidates the borrowers collateral.
      *  The collateral seized is transferred to the liquidator.
-     * @param borrower The borrower of this mToken to be liquidated
+     * @param borrower The borrower of this kToken to be liquidated
      * @param repayAmount The amount of the underlying borrowed asset to repay
-     * @param mTokenCollateral The market in which to seize collateral from the borrower
+     * @param kTokenCollateral The market in which to seize collateral from the borrower
      * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
      */
-    function liquidateBorrow(address borrower, uint repayAmount, MTokenInterface mTokenCollateral) external returns (uint) {
-        (uint err,) = liquidateBorrowInternal(borrower, repayAmount, mTokenCollateral);
+    function liquidateBorrow(address borrower, uint repayAmount, KTokenInterface kTokenCollateral) external returns (uint) {
+        (uint err,) = liquidateBorrowInternal(borrower, repayAmount, kTokenCollateral);
         return err;
     }
 
@@ -119,7 +118,7 @@ contract MUSB is MToken, MBep20Interface {
      * @param token The address of the ERC-20 token to sweep
      */
     function sweepToken(EIP20NonStandardInterface token) external {
-    	require(address(token) != underlying, "MUSB::sweepToken: can not sweep underlying token");
+    	require(address(token) != underlying, "can not sweep underlying token");
     	uint256 balance = token.balanceOf(address(this));
     	token.transfer(admin, balance);
     }
@@ -155,33 +154,30 @@ contract MUSB is MToken, MBep20Interface {
      *            See here: https://medium.com/coinmonks/missing-return-value-bug-at-least-130-tokens-affected-d67bf08521ca
      */
     function doTransferIn(address from, uint amount) internal returns (uint) {
-        USB(underlying).burn(from, amount);
-		return amount;
-		
-		//EIP20NonStandardInterface token = EIP20NonStandardInterface(underlying);
-        //uint balanceBefore = EIP20Interface(underlying).balanceOf(address(this));
-        //token.transferFrom(from, address(this), amount);
-        //
-        //bool success;
-        //assembly {
-        //    switch returndatasize()
-        //        case 0 {                       // This is a non-standard ERC-20
-        //            success := not(0)          // set success to true
-        //        }
-        //        case 32 {                      // This is a compliant ERC-20
-        //            returndatacopy(0, 0, 32)
-        //            success := mload(0)        // Set `success = returndata` of external call
-        //        }
-        //        default {                      // This is an excessively non-compliant ERC-20, revert.
-        //            revert(0, 0)
-        //        }
-        //}
-        //require(success, "TOKEN_TRANSFER_IN_FAILED");
-        //
-        //// Calculate the amount that was *actually* transferred
-        //uint balanceAfter = EIP20Interface(underlying).balanceOf(address(this));
-        //require(balanceAfter >= balanceBefore, "TOKEN_TRANSFER_IN_OVERFLOW");
-        //return balanceAfter - balanceBefore;   // underflow already checked above, just subtract
+        EIP20NonStandardInterface token = EIP20NonStandardInterface(underlying);
+        uint balanceBefore = EIP20Interface(underlying).balanceOf(address(this));
+        token.transferFrom(from, address(this), amount);
+
+        bool success;
+        assembly {
+            switch returndatasize()
+                case 0 {                       // This is a non-standard ERC-20
+                    success := not(0)          // set success to true
+                }
+                case 32 {                      // This is a compliant ERC-20
+                    returndatacopy(0, 0, 32)
+                    success := mload(0)        // Set `success = returndata` of external call
+                }
+                default {                      // This is an excessively non-compliant ERC-20, revert.
+                    revert(0, 0)
+                }
+        }
+        require(success, "TOKEN_TRANSFER_IN_FAILED");
+
+        // Calculate the amount that was *actually* transferred
+        uint balanceAfter = EIP20Interface(underlying).balanceOf(address(this));
+        require(balanceAfter >= balanceBefore, "TOKEN_TRANSFER_IN_OVERFLOW");
+        return balanceAfter - balanceBefore;   // underflow already checked above, just subtract
     }
 
     /**
@@ -194,35 +190,33 @@ contract MUSB is MToken, MBep20Interface {
      *            See here: https://medium.com/coinmonks/missing-return-value-bug-at-least-130-tokens-affected-d67bf08521ca
      */
     function doTransferOut(address payable to, uint amount) internal {
-        USB(underlying).mint(to, amount);
-		
-        //EIP20NonStandardInterface token = EIP20NonStandardInterface(underlying);
-        //token.transfer(to, amount);
-        //
-        //bool success;
-        //assembly {
-        //    switch returndatasize()
-        //        case 0 {                      // This is a non-standard ERC-20
-        //            success := not(0)          // set success to true
-        //        }
-        //        case 32 {                     // This is a compliant ERC-20
-        //            returndatacopy(0, 0, 32)
-        //            success := mload(0)        // Set `success = returndata` of external call
-        //        }
-        //        default {                     // This is an excessively non-compliant ERC-20, revert.
-        //            revert(0, 0)
-        //        }
-        //}
-        //require(success, "TOKEN_TRANSFER_OUT_FAILED");
+        EIP20NonStandardInterface token = EIP20NonStandardInterface(underlying);
+        token.transfer(to, amount);
+
+        bool success;
+        assembly {
+            switch returndatasize()
+                case 0 {                      // This is a non-standard ERC-20
+                    success := not(0)          // set success to true
+                }
+                case 32 {                     // This is a compliant ERC-20
+                    returndatacopy(0, 0, 32)
+                    success := mload(0)        // Set `success = returndata` of external call
+                }
+                default {                     // This is an excessively non-compliant ERC-20, revert.
+                    revert(0, 0)
+                }
+        }
+        require(success, "TOKEN_TRANSFER_OUT_FAILED");
     }
 
     /**
     * @notice Admin call to delegate the votes of the COMP-like underlying
     * @param compLikeDelegatee The address to delegate votes to
-    * @dev MTokens whose underlying are not CompLike should revert here
+    * @dev KTokens whose underlying are not CompLike should revert here
     */
     function _delegateCompLikeTo(address compLikeDelegatee) external {
-        require(msg.sender == admin, "only the admin may set the comp-like delegate");
+        require(msg.sender == admin, "only admin");
         CompLike(underlying).delegate(compLikeDelegatee);
     }
 }

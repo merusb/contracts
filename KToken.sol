@@ -1,18 +1,18 @@
 pragma solidity ^0.5.16;
 
 import "./ComptrollerInterface.sol";
-import "./MTokenInterfaces.sol";
+import "./KTokenInterfaces.sol";
 import "./ErrorReporter.sol";
 import "./Exponential.sol";
 import "./EIP20Interface.sol";
 import "./InterestRateModel.sol";
 
 /**
- * @title Compound's MToken Contract
- * @notice Abstract base for MTokens
+ * @title Compound's KToken Contract
+ * @notice Abstract base for KTokens
  * @author Compound
  */
-contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
+contract KToken is KTokenInterface, Exponential, TokenErrorReporter {
     /**
      * @notice Initialize the money market
      * @param comptroller_ The address of the Comptroller
@@ -28,12 +28,18 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
                         string memory name_,
                         string memory symbol_,
                         uint8 decimals_) public {
-        require(msg.sender == admin, "only admin may initialize the market");
-        require(accrualBlockNumber == 0 && borrowIndex == 0, "market may only be initialized once");
+
+        require(msg.sender == admin || admin == address(0), "only admin");
+        if(admin == address(0)) {
+            admin = msg.sender;
+            emit NewAdmin(address(0), msg.sender);
+        }
+
+        //require(accrualBlockNumber == 0 && borrowIndex == 0, "only be initialized once");
 
         // Set initial exchange rate
         initialExchangeRateMantissa = initialExchangeRateMantissa_;
-        require(initialExchangeRateMantissa > 0, "initial exchange rate must be greater than zero.");
+        require(initialExchangeRateMantissa > 0, "initial exchange rate must > 0.");
 
         // Set the comptroller
         uint err = _setComptroller(comptroller_);
@@ -45,7 +51,7 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
 
         // Set the interest rate model (depends on block number / borrow index)
         err = _setInterestRateModelFresh(interestRateModel_);
-        require(err == uint(Error.NO_ERROR), "setting interest rate model failed");
+        require(err == uint(Error.NO_ERROR), "setInterestRateModel failed");
 
         name = name_;
         symbol = symbol_;
@@ -87,7 +93,7 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
         /* Do the calculations, checking for {under,over}flow */
         MathError mathErr;
         uint allowanceNew;
-        uint srmTokensNew;
+        uint srcTokensNew;
         uint dstTokensNew;
 
         (mathErr, allowanceNew) = subUInt(startingAllowance, tokens);
@@ -95,7 +101,7 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
             return fail(Error.MATH_ERROR, FailureInfo.TRANSFER_NOT_ALLOWED);
         }
 
-        (mathErr, srmTokensNew) = subUInt(accountTokens[src], tokens);
+        (mathErr, srcTokensNew) = subUInt(accountTokens[src], tokens);
         if (mathErr != MathError.NO_ERROR) {
             return fail(Error.MATH_ERROR, FailureInfo.TRANSFER_NOT_ENOUGH);
         }
@@ -109,7 +115,7 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
         // EFFECTS & INTERACTIONS
         // (No safe failures beyond this point)
 
-        accountTokens[src] = srmTokensNew;
+        accountTokens[src] = srcTokensNew;
         accountTokens[dst] = dstTokensNew;
 
         /* Eat some of the allowance (if necessary) */
@@ -201,7 +207,7 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
      * @return (possible error, token balance, borrow balance, exchange rate mantissa)
      */
     function getAccountSnapshot(address account) external view returns (uint, uint, uint, uint) {
-        uint mTokenBalance = accountTokens[account];
+        uint kTokenBalance = accountTokens[account];
         uint borrowBalance;
         uint exchangeRateMantissa;
 
@@ -217,7 +223,7 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
             return (uint(Error.MATH_ERROR), 0, 0, 0);
         }
 
-        return (uint(Error.NO_ERROR), mTokenBalance, borrowBalance, exchangeRateMantissa);
+        return (uint(Error.NO_ERROR), kTokenBalance, borrowBalance, exchangeRateMantissa);
     }
 
     /**
@@ -229,7 +235,7 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
     }
 
     /**
-     * @notice Returns the current per-block borrow interest rate for this mToken
+     * @notice Returns the current per-block borrow interest rate for this kToken
      * @return The borrow interest rate per block, scaled by 1e18
      */
     function borrowRatePerBlock() external view returns (uint) {
@@ -237,7 +243,7 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
     }
 
     /**
-     * @notice Returns the current per-block supply interest rate for this mToken
+     * @notice Returns the current per-block supply interest rate for this kToken
      * @return The supply interest rate per block, scaled by 1e18
      */
     function supplyRatePerBlock() external view returns (uint) {
@@ -270,7 +276,7 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
      */
     function borrowBalanceStored(address account) public view returns (uint) {
         (MathError err, uint result) = borrowBalanceStoredInternal(account);
-        require(err == MathError.NO_ERROR, "borrowBalanceStored: borrowBalanceStoredInternal failed");
+        require(err == MathError.NO_ERROR, "borrowBalanceStored failed");
         return result;
     }
 
@@ -321,18 +327,18 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
     }
 
     /**
-     * @notice Calculates the exchange rate from the underlying to the MToken
+     * @notice Calculates the exchange rate from the underlying to the KToken
      * @dev This function does not accrue interest before calculating the exchange rate
      * @return Calculated exchange rate scaled by 1e18
      */
     function exchangeRateStored() public view returns (uint) {
         (MathError err, uint result) = exchangeRateStoredInternal();
-        require(err == MathError.NO_ERROR, "exchangeRateStored: exchangeRateStoredInternal failed");
+        require(err == MathError.NO_ERROR, "exchangeRateStored failed");
         return result;
     }
 
     /**
-     * @notice Calculates the exchange rate from the underlying to the MToken
+     * @notice Calculates the exchange rate from the underlying to the KToken
      * @dev This function does not accrue interest before calculating the exchange rate
      * @return (error code, calculated exchange rate scaled by 1e18)
      */
@@ -369,7 +375,7 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
     }
 
     /**
-     * @notice Get cash balance of this mToken in the underlying asset
+     * @notice Get cash balance of this kToken in the underlying asset
      * @return The quantity of underlying asset owned by this contract
      */
     function getCash() external view returns (uint) {
@@ -462,7 +468,7 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
     }
 
     /**
-     * @notice Sender supplies assets into the market and receives mTokens in exchange
+     * @notice Sender supplies assets into the market and receives kTokens in exchange
      * @dev Accrues interest whether or not the operation succeeds, unless reverted
      * @param mintAmount The amount of the underlying asset to supply
      * @return (uint, uint) An error code (0=success, otherwise a failure, see ErrorReporter.sol), and the actual mint amount.
@@ -488,7 +494,7 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
     }
 
     /**
-     * @notice User supplies assets into the market and receives mTokens in exchange
+     * @notice User supplies assets into the market and receives kTokens in exchange
      * @dev Assumes interest has already been accrued up to the current block
      * @param minter The address of the account which is supplying the assets
      * @param mintAmount The amount of the underlying asset to supply
@@ -519,32 +525,32 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
 
         /*
          *  We call `doTransferIn` for the minter and the mintAmount.
-         *  Note: The mToken must handle variations between ERC-20 and ETH underlying.
+         *  Note: The kToken must handle variations between ERC-20 and ETH underlying.
          *  `doTransferIn` reverts if anything goes wrong, since we can't be sure if
          *  side-effects occurred. The function returns the amount actually transferred,
-         *  in case of a fee. On success, the mToken holds an additional `actualMintAmount`
+         *  in case of a fee. On success, the kToken holds an additional `actualMintAmount`
          *  of cash.
          */
         vars.actualMintAmount = doTransferIn(minter, mintAmount);
 
         /*
-         * We get the current exchange rate and calculate the number of mTokens to be minted:
+         * We get the current exchange rate and calculate the number of kTokens to be minted:
          *  mintTokens = actualMintAmount / exchangeRate
          */
 
         (vars.mathErr, vars.mintTokens) = divScalarByExpTruncate(vars.actualMintAmount, Exp({mantissa: vars.exchangeRateMantissa}));
-        require(vars.mathErr == MathError.NO_ERROR, "MINT_EXCHANGE_CALCULATION_FAILED");
+        require(vars.mathErr == MathError.NO_ERROR, "MINT_EXCHANGE_FAILED");
 
         /*
-         * We calculate the new total supply of mTokens and minter token balance, checking for overflow:
+         * We calculate the new total supply of kTokens and minter token balance, checking for overflow:
          *  totalSupplyNew = totalSupply + mintTokens
          *  accountTokensNew = accountTokens[minter] + mintTokens
          */
         (vars.mathErr, vars.totalSupplyNew) = addUInt(totalSupply, vars.mintTokens);
-        require(vars.mathErr == MathError.NO_ERROR, "MINT_NEW_TOTAL_SUPPLY_CALCULATION_FAILED");
+        require(vars.mathErr == MathError.NO_ERROR, "MINT_NEW_TOTAL_SUPPLY_FAILED");
 
         (vars.mathErr, vars.accountTokensNew) = addUInt(accountTokens[minter], vars.mintTokens);
-        require(vars.mathErr == MathError.NO_ERROR, "MINT_NEW_ACCOUNT_BALANCE_CALCULATION_FAILED");
+        require(vars.mathErr == MathError.NO_ERROR, "MINT_NEW_ACCOUNT_BALANCE_FAILED");
 
         /* We write previously calculated values into storage */
         totalSupply = vars.totalSupplyNew;
@@ -562,9 +568,9 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
     }
 
     /**
-     * @notice Sender redeems mTokens in exchange for the underlying asset
+     * @notice Sender redeems kTokens in exchange for the underlying asset
      * @dev Accrues interest whether or not the operation succeeds, unless reverted
-     * @param redeemTokens The number of mTokens to redeem into underlying
+     * @param redeemTokens The number of kTokens to redeem into underlying
      * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
      */
     function redeemInternal(uint redeemTokens) internal nonReentrant returns (uint) {
@@ -578,9 +584,9 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
     }
 
     /**
-     * @notice Sender redeems mTokens in exchange for a specified amount of underlying asset
+     * @notice Sender redeems kTokens in exchange for a specified amount of underlying asset
      * @dev Accrues interest whether or not the operation succeeds, unless reverted
-     * @param redeemAmount The amount of underlying to receive from redeeming mTokens
+     * @param redeemAmount The amount of underlying to receive from redeeming kTokens
      * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
      */
     function redeemUnderlyingInternal(uint redeemAmount) internal nonReentrant returns (uint) {
@@ -604,15 +610,15 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
     }
 
     /**
-     * @notice User redeems mTokens in exchange for the underlying asset
+     * @notice User redeems kTokens in exchange for the underlying asset
      * @dev Assumes interest has already been accrued up to the current block
      * @param redeemer The address of the account which is redeeming the tokens
-     * @param redeemTokensIn The number of mTokens to redeem into underlying (only one of redeemTokensIn or redeemAmountIn may be non-zero)
-     * @param redeemAmountIn The number of underlying tokens to receive from redeeming mTokens (only one of redeemTokensIn or redeemAmountIn may be non-zero)
+     * @param redeemTokensIn The number of kTokens to redeem into underlying (only one of redeemTokensIn or redeemAmountIn may be non-zero)
+     * @param redeemAmountIn The number of underlying tokens to receive from redeeming kTokens (only one of redeemTokensIn or redeemAmountIn may be non-zero)
      * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
      */
     function redeemFresh(address payable redeemer, uint redeemTokensIn, uint redeemAmountIn) internal returns (uint) {
-        require(redeemTokensIn == 0 || redeemAmountIn == 0, "one of redeemTokensIn or redeemAmountIn must be zero");
+        require(redeemTokensIn == 0 || redeemAmountIn == 0, "redeem TokensIn or AmountIn ==0");
 
         RedeemLocalVars memory vars;
 
@@ -687,8 +693,8 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
 
         /*
          * We invoke doTransferOut for the redeemer and the redeemAmount.
-         *  Note: The mToken must handle variations between ERC-20 and ETH underlying.
-         *  On success, the mToken has redeemAmount less of cash.
+         *  Note: The kToken must handle variations between ERC-20 and ETH underlying.
+         *  On success, the kToken has redeemAmount less of cash.
          *  doTransferOut reverts if anything goes wrong, since we can't be sure if side effects occurred.
          */
         doTransferOut(redeemer, vars.redeemAmount);
@@ -779,8 +785,8 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
 
         /*
          * We invoke doTransferOut for the borrower and the borrowAmount.
-         *  Note: The mToken must handle variations between ERC-20 and ETH underlying.
-         *  On success, the mToken borrowAmount less of cash.
+         *  Note: The kToken must handle variations between ERC-20 and ETH underlying.
+         *  On success, the kToken borrowAmount less of cash.
          *  doTransferOut reverts if anything goes wrong, since we can't be sure if side effects occurred.
          */
         doTransferOut(borrower, borrowAmount);
@@ -885,8 +891,8 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
 
         /*
          * We call doTransferIn for the payer and the repayAmount
-         *  Note: The mToken must handle variations between ERC-20 and ETH underlying.
-         *  On success, the mToken holds an additional repayAmount of cash.
+         *  Note: The kToken must handle variations between ERC-20 and ETH underlying.
+         *  On success, the kToken holds an additional repayAmount of cash.
          *  doTransferIn reverts if anything goes wrong, since we can't be sure if side effects occurred.
          *   it returns the amount actually transferred, in case of a fee.
          */
@@ -898,10 +904,10 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
          *  totalBorrowsNew = totalBorrows - actualRepayAmount
          */
         (vars.mathErr, vars.accountBorrowsNew) = subUInt(vars.accountBorrows, vars.actualRepayAmount);
-        require(vars.mathErr == MathError.NO_ERROR, "REPAY_BORROW_NEW_ACCOUNT_BORROW_BALANCE_CALCULATION_FAILED");
+        require(vars.mathErr == MathError.NO_ERROR, "REPAY_BORROW_BALANCE_FAILED");
 
         (vars.mathErr, vars.totalBorrowsNew) = subUInt(totalBorrows, vars.actualRepayAmount);
-        require(vars.mathErr == MathError.NO_ERROR, "REPAY_BORROW_NEW_TOTAL_BALANCE_CALCULATION_FAILED");
+        require(vars.mathErr == MathError.NO_ERROR, "REPAY_TOTAL_BALANCE_FAILED");
 
         /* We write the previously calculated values into storage */
         accountBorrows[borrower].principal = vars.accountBorrowsNew;
@@ -921,40 +927,40 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
     /**
      * @notice The sender liquidates the borrowers collateral.
      *  The collateral seized is transferred to the liquidator.
-     * @param borrower The borrower of this mToken to be liquidated
-     * @param mTokenCollateral The market in which to seize collateral from the borrower
+     * @param borrower The borrower of this kToken to be liquidated
+     * @param kTokenCollateral The market in which to seize collateral from the borrower
      * @param repayAmount The amount of the underlying borrowed asset to repay
      * @return (uint, uint) An error code (0=success, otherwise a failure, see ErrorReporter.sol), and the actual repayment amount.
      */
-    function liquidateBorrowInternal(address borrower, uint repayAmount, MTokenInterface mTokenCollateral) internal nonReentrant returns (uint, uint) {
+    function liquidateBorrowInternal(address borrower, uint repayAmount, KTokenInterface kTokenCollateral) internal nonReentrant returns (uint, uint) {
         uint error = accrueInterest();
         if (error != uint(Error.NO_ERROR)) {
             // accrueInterest emits logs on errors, but we still want to log the fact that an attempted liquidation failed
             return (fail(Error(error), FailureInfo.LIQUIDATE_ACCRUE_BORROW_INTEREST_FAILED), 0);
         }
 
-        error = mTokenCollateral.accrueInterest();
+        error = kTokenCollateral.accrueInterest();
         if (error != uint(Error.NO_ERROR)) {
             // accrueInterest emits logs on errors, but we still want to log the fact that an attempted liquidation failed
             return (fail(Error(error), FailureInfo.LIQUIDATE_ACCRUE_COLLATERAL_INTEREST_FAILED), 0);
         }
 
         // liquidateBorrowFresh emits borrow-specific logs on errors, so we don't need to
-        return liquidateBorrowFresh(msg.sender, borrower, repayAmount, mTokenCollateral);
+        return liquidateBorrowFresh(msg.sender, borrower, repayAmount, kTokenCollateral);
     }
 
     /**
      * @notice The liquidator liquidates the borrowers collateral.
      *  The collateral seized is transferred to the liquidator.
-     * @param borrower The borrower of this mToken to be liquidated
+     * @param borrower The borrower of this kToken to be liquidated
      * @param liquidator The address repaying the borrow and seizing collateral
-     * @param mTokenCollateral The market in which to seize collateral from the borrower
+     * @param kTokenCollateral The market in which to seize collateral from the borrower
      * @param repayAmount The amount of the underlying borrowed asset to repay
      * @return (uint, uint) An error code (0=success, otherwise a failure, see ErrorReporter.sol), and the actual repayment amount.
      */
-    function liquidateBorrowFresh(address liquidator, address borrower, uint repayAmount, MTokenInterface mTokenCollateral) internal returns (uint, uint) {
+    function liquidateBorrowFresh(address liquidator, address borrower, uint repayAmount, KTokenInterface kTokenCollateral) internal returns (uint, uint) {
         /* Fail if liquidate not allowed */
-        uint allowed = comptroller.liquidateBorrowAllowed(address(this), address(mTokenCollateral), liquidator, borrower, repayAmount);
+        uint allowed = comptroller.liquidateBorrowAllowed(address(this), address(kTokenCollateral), liquidator, borrower, repayAmount);
         if (allowed != 0) {
             return (failOpaque(Error.COMPTROLLER_REJECTION, FailureInfo.LIQUIDATE_COMPTROLLER_REJECTION, allowed), 0);
         }
@@ -964,8 +970,8 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
             return (fail(Error.MARKET_NOT_FRESH, FailureInfo.LIQUIDATE_FRESHNESS_CHECK), 0);
         }
 
-        /* Verify mTokenCollateral market's block number equals current block number */
-        if (mTokenCollateral.accrualBlockNumber() != getBlockNumber()) {
+        /* Verify kTokenCollateral market's block number equals current block number */
+        if (kTokenCollateral.accrualBlockNumber() != getBlockNumber()) {
             return (fail(Error.MARKET_NOT_FRESH, FailureInfo.LIQUIDATE_COLLATERAL_FRESHNESS_CHECK), 0);
         }
 
@@ -996,40 +1002,40 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
         // (No safe failures beyond this point)
 
         /* We calculate the number of collateral tokens that will be seized */
-        (uint amountSeizeError, uint seizeTokens) = comptroller.liquidateCalculateSeizeTokens(address(this), address(mTokenCollateral), actualRepayAmount);
-        require(amountSeizeError == uint(Error.NO_ERROR), "LIQUIDATE_COMPTROLLER_CALCULATE_AMOUNT_SEIZE_FAILED");
+        (uint amountSeizeError, uint seizeTokens) = comptroller.liquidateCalculateSeizeTokens(address(this), address(kTokenCollateral), actualRepayAmount);
+        require(amountSeizeError == uint(Error.NO_ERROR), "LIQUIDATE_SEIZE_FAILED");
 
         /* Revert if borrower collateral token balance < seizeTokens */
-        require(mTokenCollateral.balanceOf(borrower) >= seizeTokens, "LIQUIDATE_SEIZE_TOO_MUCH");
+        require(kTokenCollateral.balanceOf(borrower) >= seizeTokens, "LIQUIDATE_SEIZE_TOO_MUCH");
 
         // If this is also the collateral, run seizeInternal to avoid re-entrancy, otherwise make an external call
         uint seizeError;
-        if (address(mTokenCollateral) == address(this)) {
+        if (address(kTokenCollateral) == address(this)) {
             seizeError = seizeInternal(address(this), liquidator, borrower, seizeTokens);
         } else {
-            seizeError = mTokenCollateral.seize(liquidator, borrower, seizeTokens);
+            seizeError = kTokenCollateral.seize(liquidator, borrower, seizeTokens);
         }
 
         /* Revert if seize tokens fails (since we cannot be sure of side effects) */
         require(seizeError == uint(Error.NO_ERROR), "token seizure failed");
 
         /* We emit a LiquidateBorrow event */
-        emit LiquidateBorrow(liquidator, borrower, actualRepayAmount, address(mTokenCollateral), seizeTokens);
+        emit LiquidateBorrow(liquidator, borrower, actualRepayAmount, address(kTokenCollateral), seizeTokens);
 
         /* We call the defense hook */
         // unused function
-        // comptroller.liquidateBorrowVerify(address(this), address(mTokenCollateral), liquidator, borrower, actualRepayAmount, seizeTokens);
+        // comptroller.liquidateBorrowVerify(address(this), address(kTokenCollateral), liquidator, borrower, actualRepayAmount, seizeTokens);
 
         return (uint(Error.NO_ERROR), actualRepayAmount);
     }
 
     /**
      * @notice Transfers collateral tokens (this market) to the liquidator.
-     * @dev Will fail unless called by another mToken during the process of liquidation.
-     *  Its absolutely critical to use msg.sender as the borrowed mToken and not a parameter.
+     * @dev Will fail unless called by another kToken during the process of liquidation.
+     *  Its absolutely critical to use msg.sender as the borrowed kToken and not a parameter.
      * @param liquidator The account receiving seized collateral
      * @param borrower The account having collateral seized
-     * @param seizeTokens The number of mTokens to seize
+     * @param seizeTokens The number of kTokens to seize
      * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
      */
     function seize(address liquidator, address borrower, uint seizeTokens) external nonReentrant returns (uint) {
@@ -1050,12 +1056,12 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
 
     /**
      * @notice Transfers collateral tokens (this market) to the liquidator.
-     * @dev Called only during an in-kind liquidation, or by liquidateBorrow during the liquidation of another MToken.
-     *  Its absolutely critical to use msg.sender as the seizer mToken and not a parameter.
-     * @param seizerToken The contract seizing the collateral (i.e. borrowed mToken)
+     * @dev Called only during an in-kind liquidation, or by liquidateBorrow during the liquidation of another KToken.
+     *  Its absolutely critical to use msg.sender as the seizer kToken and not a parameter.
+     * @param seizerToken The contract seizing the collateral (i.e. borrowed kToken)
      * @param liquidator The account receiving seized collateral
      * @param borrower The account having collateral seized
-     * @param seizeTokens The number of mTokens to seize
+     * @param seizeTokens The number of kTokens to seize
      * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
      */
     function seizeInternal(address seizerToken, address liquidator, address borrower, uint seizeTokens) internal returns (uint) {
@@ -1281,8 +1287,8 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
 
         /*
          * We call doTransferIn for the caller and the addAmount
-         *  Note: The mToken must handle variations between ERC-20 and ETH underlying.
-         *  On success, the mToken holds an additional addAmount of cash.
+         *  Note: The kToken must handle variations between ERC-20 and ETH underlying.
+         *  On success, the kToken holds an additional addAmount of cash.
          *  doTransferIn reverts if anything goes wrong, since we can't be sure if side effects occurred.
          *  it returns the amount actually transferred, in case of a fee.
          */
@@ -1292,7 +1298,7 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
         totalReservesNew = totalReserves + actualAddAmount;
 
         /* Revert on overflow */
-        require(totalReservesNew >= totalReserves, "add reserves unexpected overflow");
+        require(totalReservesNew >= totalReserves, "add reserves overflow");
 
         // Store reserves[n+1] = reserves[n] + actualAddAmount
         totalReserves = totalReservesNew;
@@ -1356,7 +1362,7 @@ contract MToken is MTokenInterface, Exponential, TokenErrorReporter {
 
         totalReservesNew = totalReserves - reduceAmount;
         // We checked reduceAmount <= totalReserves above, so this should never revert.
-        require(totalReservesNew <= totalReserves, "reduce reserves unexpected underflow");
+        require(totalReservesNew <= totalReserves, "reduce reserves underflow");
 
         // Store reserves[n+1] = reserves[n] - reduceAmount
         totalReserves = totalReservesNew;

@@ -4,7 +4,7 @@ import "./ComptrollerInterface.sol";
 import "./InterestRateModel.sol";
 import "./EIP20NonStandardInterface.sol";
 
-contract MTokenStorage {
+contract KTokenStorage {
     /**
      * @dev Guard variable for re-entrancy checks
      */
@@ -57,7 +57,7 @@ contract MTokenStorage {
     InterestRateModel public interestRateModel;
 
     /**
-     * @notice Initial exchange rate used when minting the first MTokens (used when totalSupply = 0)
+     * @notice Initial exchange rate used when minting the first KTokens (used when totalSupply = 0)
      */
     uint internal initialExchangeRateMantissa;
 
@@ -123,11 +123,11 @@ contract MTokenStorage {
 
 }
 
-contract MTokenInterface is MTokenStorage {
+contract KTokenInterface is KTokenStorage {
     /**
-     * @notice Indicator that this is a MToken contract (for inspection)
+     * @notice Indicator that this is a KToken contract (for inspection)
      */
-    bool public constant isMToken = true;
+    bool public constant isKToken = true;
 
 
     /*** Market Events ***/
@@ -247,14 +247,14 @@ contract MTokenInterface is MTokenStorage {
     function _setInterestRateModel(InterestRateModel newInterestRateModel) public returns (uint);
 }
 
-contract MBep20Storage {
+contract KBep20Storage {
     /**
-     * @notice Underlying asset for this MToken
+     * @notice Underlying asset for this KToken
      */
     address public underlying;
 }
 
-contract MBep20Interface is MBep20Storage {
+contract KBep20Interface is KBep20Storage {
 
     /*** User Interface ***/
 
@@ -264,7 +264,7 @@ contract MBep20Interface is MBep20Storage {
     function borrow(uint borrowAmount) external returns (uint);
     function repayBorrow(uint repayAmount) external returns (uint);
     function repayBorrowBehalf(address borrower, uint repayAmount) external returns (uint);
-    function liquidateBorrow(address borrower, uint repayAmount, MTokenInterface mTokenCollateral) external returns (uint);
+    function liquidateBorrow(address borrower, uint repayAmount, KTokenInterface mTokenCollateral) external returns (uint);
     function sweepToken(EIP20NonStandardInterface token) external;
 
 
